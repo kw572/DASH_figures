@@ -1,2 +1,2 @@
 # DASH_figures
- Generate Figures for DASH papaer
+ Generate Figures for DASH paper
