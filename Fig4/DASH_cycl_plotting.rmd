@@ -1,0 +1,133 @@
+---
+title: "DASH_cycl_rarefract.rmd"
+output: html_document
+date: "2022-10-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(patchwork)
+library(tidyverse)
+```
+
+```{r}
+rarefraction <- readRDS("rarefraction_cycl.rds")
+```
+
+```{r}
+source("~/Rfunction/scTheme.R")
+# fonts, sizes, etc.
+small.font = 6*2
+big.font = 6*2
+line.width = 0.5*2
+pt.size=0.01*2
+pt.stroke=0.3*2
+label.size=2*2
+
+scTheme <- scThemes(
+  small.font = small.font,
+  big.font = big.font,
+  line.width = line.width,
+  pt.size=pt.size,
+  pt.stroke=pt.stroke,
+  label.size=label.size
+)
+
+```
+
+```{r }
+mckolors <- read.csv("~/Rfunction/McKolor_v1.csv") %>%
+  as.list() %>%
+  lapply(
+    FUN=function(X) X[X!=""]
+  )
+```
+
+```{r}
+Summarized_table<-rarefraction %>% 
+  group_by(orig.ident) %>% 
+  summarise(Median_Count=median(nCount_RNA),Median_Feature=median(nFeature_RNA),Median_16S=median(pct.16S),Median_mRNA=median(mRNA), Depth.val=median(Depth.val)) %>% 
+separate(orig.ident,into=c("rep","Depth"),sep="_") 
+
+add_zero<-tribble(~"rep",~"Depth",~"Median_Count",~"Median_Feature",~"Median_16S",~"Median_mRNA",~"Depth.val",
+                  "0cycl",0,0,0,0,0,0,
+                  "5cycl",0,0,0,0,0,0,
+                  "10cycl",0,0,0,0,0,0) 
+
+Summarized_table<-Summarized_table %>% rbind(add_zero)
+```
+
+```{r}
+p1<-Summarized_table%>% 
+  ggplot(mapping=aes(x=Depth.val,y=Median_Count,color=rep))+
+  geom_point()+
+  geom_line()+
+  scTheme$scatter+
+  scale_y_continuous(limits=c(0,5000))+
+  scale_x_continuous(limits=c(0,150000000),labels = c("0M","50M","100M","150M"))+
+  ylab("Median of UMI counts per cell")+
+  xlab("Total reads")+
+  theme(aspect.ratio = 1)+
+    scale_color_manual(values = mckolors$futurama_ggsci)
+p1
+```
+
+```{r}
+p2<-Summarized_table%>% 
+  ggplot(mapping=aes(x=Depth.val,y=Median_Feature,color=rep))+
+  geom_point()+
+  geom_line()+
+  scTheme$scatter+
+  scale_y_continuous(limits=c(0,2500))+
+  scale_x_continuous(limits=c(0,150000000),labels = c("0M","50M","100M","150M"))+
+  ylab("Median of Gene per cell")+
+  xlab("Total reads")+
+  theme(aspect.ratio = 1)+
+    scale_color_manual(values = mckolors$futurama_ggsci)
+
+p2
+```
+
+```{r}
+p3<-Summarized_table%>% 
+  ggplot(mapping=aes(x=Depth.val,y=Median_mRNA,color=rep))+
+  scTheme$scatter+
+  scale_y_continuous(limits=c(0,5000))+
+  scale_x_continuous(limits=c(0,150000000),labels = c("0M","50M","100M","150M"))+
+  geom_point()+
+  geom_line()+
+  ylab("Median of mRNA counts per cell")+
+  xlab("Total reads")+
+  theme(aspect.ratio = 1)+
+    scale_color_manual(values = mckolors$futurama_ggsci)
+p3
+```
+
+```{r}
+p4<-Summarized_table%>% 
+  ggplot(mapping=aes(x=Depth.val,y=Median_16S*100,color=rep))+
+  scTheme$scatter+
+  scale_y_continuous(limits=c(0,0.5))+
+  scale_x_continuous(limits=c(0,150000000),labels = c("0M","50M","100M","150M"))+
+  geom_point()+
+  geom_line()+
+  ylab("Median % of 16S rRNA per cell")+
+  xlab("Total reads")+
+  theme(aspect.ratio = 1)+
+    scale_color_manual(values = mckolors$futurama_ggsci)
+p4
+```
+
+```{r}
+pdf("rarefraction.rep.pdf",width=10,height=10)
+wrap_plots(p1,p2,p3,p4,guides = "collect")+plot_annotation(tag_levels = 'A')
+dev.off()
+```
+
+```{r}
+saveRDS(list(p1,p2,p3,p4),"rarefract.cycl.rds")
+```
+

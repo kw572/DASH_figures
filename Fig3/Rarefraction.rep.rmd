@@ -1,0 +1,85 @@
+---
+title: "Rarefraction.rep.rmd"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE}
+library(Seurat)
+library(tidyverse)
+library(purrr)
+library(rlang)
+```
+
+```{r Creat list-column to store datasets }
+getwd()
+Refract_df<-tribble(~"Rep",~"Depth",~"DASH",~"PATH",
+                 "1","10M","untreated","./CellRanger_output/rep1_10M/outs/raw_feature_bc_matrix",
+                 "1","50M","untreated","./CellRanger_output/rep1_50M/outs/raw_feature_bc_matrix",
+                 "1","100M","untreated","./CellRanger_output/rep1_100M/outs/raw_feature_bc_matrix",
+                 "1","150M","untreated","./CellRanger_output/rep1_150M/outs/raw_feature_bc_matrix",
+                 "1","200M","untreated","./CellRanger_output/rep1_200M/outs/raw_feature_bc_matrix",                 "2","10M","untreated","./CellRanger_output/rep2_10M/outs/raw_feature_bc_matrix",
+                 "2","50M","untreated","./CellRanger_output/rep2_50M/outs/raw_feature_bc_matrix",
+                 "2","100M","untreated","./CellRanger_output/rep2_100M/outs/raw_feature_bc_matrix",
+                 "3","10M","untreated","./CellRanger_output/rep3_10M/outs/raw_feature_bc_matrix",
+                 "3","50M","untreated","./CellRanger_output/rep3_50M/outs/raw_feature_bc_matrix",
+                 "3","100M","untreated","./CellRanger_output/rep3_100M/outs/raw_feature_bc_matrix",
+                "1","10M","DASH","./CellRanger_output/rep1_dash_10M/outs/raw_feature_bc_matrix",
+                 "1","50M","DASH","./CellRanger_output/rep1_dash_50M/outs/raw_feature_bc_matrix",
+                 "1","100M","DASH","./CellRanger_output/rep1_dash_100M/outs/raw_feature_bc_matrix",
+                 "1","150M","DASH","./CellRanger_output/rep1_dash_150M/outs/raw_feature_bc_matrix",
+                 "1","200M","DASH","./CellRanger_output/rep1_dash_200M/outs/raw_feature_bc_matrix",                 "2","10M","DASH","./CellRanger_output/rep2_dash_10M/outs/raw_feature_bc_matrix",
+                 "2","50M","DASH","./CellRanger_output/rep2_dash_50M/outs/raw_feature_bc_matrix",
+                 "2","100M","DASH","./CellRanger_output/rep2_dash_100M/outs/raw_feature_bc_matrix",
+                 "3","10M","DASH","./CellRanger_output/rep3_dash_10M/outs/raw_feature_bc_matrix",
+                 "3","50M","DASH","./CellRanger_output/rep3_dash_50M/outs/raw_feature_bc_matrix",
+                 "3","100M","DASH","./CellRanger_output/rep3_dash_100M/outs/raw_feature_bc_matrix"
+                 )
+Refract_df<-Refract_df %>% mutate(Seurat.mat=map(PATH,Read10X))
+```
+
+```{r Creat Seurat obj with matrix and name by conditions}
+CreateSeuratObject_bySample<-function(count,project_name){
+  return(CreateSeuratObject(counts = count, project = project_name,min.features = 200))
+}
+
+Refract_df<-Refract_df %>%
+  mutate(Name=paste0(Rep,"_",DASH,"_",Depth)) %>% 
+  mutate(Seurat.obj=map2(Seurat.mat,Name,~CreateSeuratObject_bySample(count =.x,project_name = .y)))
+```
+
+```{r}
+merge_refact<-merge(Refract_df$Seurat.obj[[1]],y=Refract_df$Seurat.obj[2:22],add.cell.ids =Refract_df$Name,project="refreaction")
+```
+
+```{r}
+merge_refact@meta.data <- merge_refact@meta.data %>% rownames_to_column(var="ID") %>% separate(ID,into=c("rep","DASH","Depth","Cell_ID"),sep="_") 
+```
+
+```{r}
+common_Cell_ID <- readRDS("~/DASH_rep/Analysis/common_Cell_ID.rds")
+
+merge_refact$Cell <-ifelse(merge_refact$rep=="1",ifelse(merge_refact$Cell_ID%in%common_Cell_ID[[1]],"Cell","Non-cell"),ifelse(merge_refact$rep=="2",ifelse(merge_refact$Cell_ID%in%common_Cell_ID[[2]],"Cell","Non-cell"),ifelse(merge_refact$rep=="3",ifelse(merge_refact$Cell_ID%in%common_Cell_ID[[3]],"Cell","Non-cell"),"NULL")))
+
+```
+
+```{r}
+merge_refact$count.16S<-merge_refact@assays$RNA@counts[which(rownames(merge_refact@assays$RNA@counts)=="16S-rRNA"),]
+metadata<-merge_refact@meta.data %>% filter(Cell=="Cell")
+```
+
+```{r}
+metadata <-metadata %>% mutate(Depth=as.numeric(ifelse(Depth=="50M",50000000,ifelse(Depth=="100M",100000000,ifelse(Depth=="150M",150000000,ifelse(Depth=="200M",200000000,ifelse(Depth=="10M",10000000,Depth)))))))
+```
+
+```{r}
+metadata <-metadata %>% mutate(rep=paste0("rep ",rep))
+```
+
+```{r}
+saveRDS(metadata,"rarefraction.rds")
+```
+

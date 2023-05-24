@@ -1,0 +1,129 @@
+---
+title: "Bin_analysis"
+output: html_document
+date: "2022-11-01"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(patchwork)
+library(tidyverse)
+library(broom)
+```
+
+```{r}
+metadata.all.rep <- readRDS("~/DASH_rep/Analysis/Venn_common_cell_ID/metadata.all.rep.rds")
+```
+
+```{r}
+metadata.all.rep<-metadata.all.rep %>% mutate(mRNA=nCount_RNA-count.16S)
+```
+
+```{r}
+source("~/Rfunction/scTheme.R")
+# fonts, sizes, etc.
+small.font = 5*2
+big.font = 5*2
+line.width = 0.5*2
+pt.size=0.01*2
+pt.stroke=0.3*2
+label.size=2*2
+
+scTheme <- scThemes(
+  small.font = small.font,
+  big.font = big.font,
+  line.width = line.width,
+  pt.size=pt.size,
+  pt.stroke=pt.stroke,
+  label.size=label.size
+)
+
+```
+
+```{r}
+per.bc<-function(metadata.all.rep,nFeature_RNA){
+  nFeature_RNA<-enquo(nFeature_RNA)
+  
+  return(
+metadata.all.rep %>% select(Cell_ID,condition,!!nFeature_RNA,orig.ident) %>% 
+  pivot_wider(names_from = condition, values_from = !!nFeature_RNA) %>% 
+  drop_na(dash,untreated) %>% arrange(untreated) 
+  )}
+
+```
+
+```{r}
+#pdf("scatter.nFeature.plot")
+df <-per.bc(metadata.all.rep,nFeature_RNA)
+
+df %>% group_by(orig.ident) %>%
+do(tidy(lm(dash ~ untreated, .)))
+
+df %>% group_by(orig.ident) %>%
+do(glance(lm(dash ~ untreated, .)))
+
+
+p_nFeature<-df %>% 
+  ggplot(mapping=aes(x=untreated,y=dash,color=orig.ident,fill=orig.ident))+
+  facet_wrap(~orig.ident)+
+  geom_point(alpha=0.5)+geom_smooth(color="#FF5733")+
+  geom_abline(slope=1)+ scale_color_manual(values = c("#0096FF","#89CFF0","#088F8F"))+scTheme$scatter+theme(aspect.ratio = 1)+
+  scale_x_continuous(limits=c(0,6500))+
+  scale_y_continuous(limits=c(0,6500))+ theme(legend.position = "none")
+#dev.off()
+
+```
+
+```{r}
+
+
+df <-per.bc(metadata.all.rep,mRNA)
+
+df %>% group_by(orig.ident) %>%
+do(tidy(lm(dash ~ untreated, .)))
+df %>% group_by(orig.ident) %>%
+do(glance(lm(dash ~ untreated, .)))
+
+p_mRNA<-df %>% 
+  ggplot(mapping=aes(x=untreated,y=dash,color=orig.ident,fill=orig.ident))+
+  facet_wrap(~orig.ident)+
+  geom_point(alpha=0.5)+geom_smooth(color="#FF5733")+
+  geom_abline(slope=1)+ scale_color_manual(values = c("#0096FF","#89CFF0","#088F8F"))+scTheme$scatter+theme(aspect.ratio = 1)+
+  scale_x_continuous(limits=c(0,25000))+
+  scale_y_continuous(limits=c(0,25000))+ theme(legend.position = "none")+ theme(axis.text.x = element_text(angle = 45, vjust = 0.5))
+
+#dev.off()
+
+```
+
+```{r}
+pdf("scatter.pdf",width = 9)
+p_nFeature/p_mRNA+plot_layout(guides = "collect")
+dev.off()
+```
+
+```{r}
+  p3<-metadata.all.rep %>% per.bc(nFeature_RNA)%>% mutate(points_bin = cut(untreated, breaks=seq(0,6500,length.out=10))) %>% 
+  ggplot(mapping=aes(x=points_bin,y=dash/untreated,color=orig.ident))+
+  geom_boxplot(outlier.shape = NA)+scTheme$scatter+scale_x_discrete(label=paste0("bin",seq(1,11)))+
+  xlab("bins of gene numbers")+ scale_color_manual(values = c("#0096FF","#89CFF0","#088F8F"))
+
+```
+
+```{r}
+  p4<-metadata.all.rep %>% per.bc(mRNA)%>% mutate(points_bin = cut(untreated, breaks=seq(0,25000,length.out=10))) %>% 
+  ggplot(mapping=aes(x=points_bin,y=dash/untreated,color=orig.ident))+
+  geom_boxplot(outlier.shape = NA)+scTheme$scatter+scale_x_discrete(label=paste0("bin",seq(1,10)))+
+  xlab("bins of mRNA")+ scale_color_manual(values = c("#0096FF","#89CFF0","#088F8F"))
+
+```
+
+```{r}
+pdf("scatter.plot.per.barcode.pdf",width = 10)
+p_nFeature/p_mRNA/(p3+p4)+plot_layout(guides = "collect")
+dev.off()
+```
+

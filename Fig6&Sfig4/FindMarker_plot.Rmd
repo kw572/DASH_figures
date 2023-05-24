@@ -1,0 +1,174 @@
+---
+title: "FindMarker_plot_marker"
+output: html_document
+date: "2023-03-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Seurat)
+library(purrr)
+library(patchwork)
+library(tidyverse)
+library(scales)
+my_color_palette <- hue_pal()(2)
+show_col(my_color_palette)
+```
+
+```{r}
+source("~/Rfunction/scTheme.R")
+# fonts, sizes, etc.
+small.font = 6*2
+big.font = 6*2
+line.width = 0.5*2
+pt.size=0.01*2
+pt.stroke=0.3*2
+label.size=2*2
+
+scTheme <- scThemes(
+  small.font = small.font,
+  big.font = big.font,
+  line.width = line.width,
+  pt.size=pt.size,
+  pt.stroke=pt.stroke,
+  label.size=label.size
+)
+
+```
+
+
+```{r}
+obj.list <- readRDS("~/DASH_rep/Analysis/Clustering/obj.list.rds")
+```
+
+```{r}
+calculate_dropout_rates <- function(seurat_obj) {
+  # Identify the cluster IDs in the Seurat object
+  cluster_ids <- unique(Idents(seurat_obj))
+  
+  # Create an empty matrix to store the dropout rates
+  dropout_matrix <- matrix(nrow = nrow(seurat_obj@assays$RNA@data), ncol = length(cluster_ids))
+  
+  # Loop through each cluster
+  for (i in 1:length(cluster_ids)) {
+    # Identify the cells in the current cluster
+    cluster_cells <- which(Idents(seurat_obj) == cluster_ids[i])
+    
+    # Calculate the dropout rates for each gene in the current cluster
+    dropout_rates <- apply(seurat_obj@assays$RNA@data[, cluster_cells], 1, function(x) mean(x == 0))
+    
+    # Store the dropout rates in the dropout matrix
+    dropout_matrix[, i] <- dropout_rates
+  }
+  
+  # Convert the matrix to a data frame and add row names (gene names)
+  dropout_df <- data.frame(dropout_matrix, row.names = rownames(seurat_obj@assays$RNA@data))
+  
+  # Rename the columns to reflect the cluster IDs
+  colnames(dropout_df) <- paste0("Cluster", cluster_ids)
+  
+  # Return the dropout data frame
+  return(dropout_df)
+}
+
+```
+
+```{r}
+dropout_df<-calculate_dropout_rates(obj.list[[1]])
+
+DASH_drop<- dropout_df %>% rownames_to_column("gene") %>% pivot_longer(cols = ClusterC1:ClusterC17,names_to = "Cluster",values_to = "dropout")%>%mutate( Drop=case_when(dropout>0.75 ~"high", dropout<=0.75~"low")) %>% group_by(Cluster) %>% count(Drop) %>% mutate(condition="DASH")
+
+dropout_df<-calculate_dropout_rates(obj.list[[2]])
+
+untreated_drop<- dropout_df %>% rownames_to_column("gene") %>% pivot_longer(cols = ClusterC1:ClusterC17,names_to = "Cluster",values_to = "dropout")%>%mutate( Drop=case_when(dropout>0.75 ~"high", dropout<=0.75~"low")) %>% group_by(Cluster) %>% count(Drop)%>% mutate(condition="untreated")
+```
+
+```{r}
+Drop_rate_df<-rbind(DASH_drop,untreated_drop)
+
+pdf("dropoff.pdf", height = 3, width = 8, compress = F)
+ggplot(Drop_rate_df %>% filter(Drop=="low"),aes(x=Cluster,y=n,fill=factor(condition,levels=c("untreated","DASH"))))+
+  geom_col(position = position_dodge2(preserve = "single"),width = 0.5)+
+  scale_x_discrete(limits=paste0("ClusterC",1:17),label=paste0("C",1:17))+
+  scale_fill_manual(values =c(my_color_palette[2],my_color_palette[1]))+
+  scTheme$bar+ylab(label="Gene expressed by >25% cells")+
+  xlab("")+
+  theme(axis.text.x = element_text(angle=45,hjust = 1),
+        legend.title = element_blank())
+dev.off()
+
+write_csv(Drop_rate_df,"Drop_rate_df.csv")
+```
+
+```{r}
+Drop_rate_df %>% filter(Drop=="low") %>% group_by(condition)%>% summarise(mutate=mean(n))
+```
+
+
+```{r}
+Markerlist<-map(obj.list,~FindAllMarkers(., min.pct = 0.25 ,only.pos = T))
+```
+
+
+
+```{r}
+dash_marker_num<-Markerlist[[1]] %>% filter(p_val_adj<0.01 & avg_log2FC > 0.25 )%>% group_by(cluster) %>% summarise(n=n()) %>% mutate(condition="DASH")
+untreated_marker_num<-Markerlist[[2]] %>% filter(p_val_adj<0.01 & avg_log2FC > 0.25 )%>% group_by(cluster) %>% summarise(n=n()) %>% mutate(condition="untreated")
+marker_num<-rbind(untreated_marker_num,dash_marker_num) 
+marker_num$cluster<-factor(marker_num$cluster,levels=paste0("C",1:17))
+```
+
+```{r}
+
+
+
+pdf("DE.barchart.pdf", height = 3, width = 8, compress = F)
+marker_num%>% ggplot(mapping=aes(x=cluster,y=n,fill=factor(condition,levels=c("untreated","DASH"))))+
+  geom_col(position = position_dodge2(preserve = "single"),width = 0.5)+
+  scale_fill_manual(values =c(my_color_palette[2],my_color_palette[1]))+ 
+  guides(fill=guide_legend(title="Condition"))+
+  scTheme$bar+ylab(label="# of DE genes")+
+  xlab("")+
+  theme(axis.text.x = element_text(angle=45,hjust = 1),
+        legend.title = element_blank())
+dev.off()
+```
+
+```{r}
+C13<-FindMarkers(obj.list[[1]], ident.1="C13",min.pct = 0.25 ,only.pos = T)
+```
+
+```{r}
+anno<-read_tsv("SMESG_anno_032323.tsv",col_names = T)
+```
+
+```{r}
+C13.anno<-C13 %>% rownames_to_column("Gene") %>% left_join(anno) %>% filter(p_val_adj<0.01 & avg_log2FC > 0.25)
+```
+
+```{r}
+obj.list[[1]]$pct.16S<-obj.list[[1]]$count.16S*100/(obj.list[[1]]$nCount_RNA+obj.list[[1]]$count.16S)
+
+obj.list[[2]]$pct.16S<-obj.list[[2]]$count.16S*100/(obj.list[[2]]$nCount_RNA+obj.list[[2]]$count.16S)
+
+
+obj.list[[1]]$C13<-ifelse(obj.list[[1]]$Annotation=="C13","C13","others")
+obj.list[[2]]$C13<-ifelse(obj.list[[2]]$Annotation=="C13","C13","others")
+Idents(obj.list[[1]])<-obj.list[[1]]$seurat_clusters
+Idents(obj.list[[2]])<-factor(obj.list[[2]]$Annotation,levels=c(paste0("C",1:17)))
+
+
+library(scales)
+color <- hue_pal()(17)[17]
+df<-obj.list[[2]]@meta.data %>% select(pct.16S,Annotation) %>% group_by(Annotation) %>% summarise(median=median(pct.16S))
+pdf("Vln_16SrRNA.pdf", height = 3,width = 5)
+VlnPlot(obj.list[[2]],features ="pct.16S")+ggtitle("untreated")+NoLegend()+
+    stat_summary(fun.y = median, geom='point', size = 5, colour = "yellow", shape = 95)+ stat_summary(fun.y=mean, colour="red", geom="text", show.legend = FALSE, vjust=-0.7, aes( label=round(..y.., digits=1)))
+dev.off()
+
+obj.list[[2]]@meta.data %>% group_by(C13) %>% summarise(mean=mean(pct.16S))
+```
+

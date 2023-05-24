@@ -1,0 +1,115 @@
+---
+title: "Figure2.bioanalyzer.rmd"
+output: html_document
+date: "2023-05-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+```
+
+
+```{r}
+cycl_data<-read_csv(file ="2022 08 16 08H 35M Electropherogram/2022 08 16 08H 35M Electropherogram.csv")
+colnames(cycl_data)<-c("Size","0 cycle","5 cycle","10 cycle","15 cycle")
+```
+
+```{r}
+depleted_data<-read_csv(file ="2022 07 05 13H 40M/2022 07 05 13H 40M Electropherogram.csv")
+colnames(depleted_data)<-c("Size","Ph0","Ph1","Ph2","Ph2","Ph3")
+```
+
+```{r}
+untreated_data<-read_csv(file ="2022 04 08 09H 41M Size Calibration/2022 04 08 09H 41M Electropherogram.csv")
+colnames(untreated_data)<-c("Size","untreated")
+```
+
+```{r}
+add_zero_row <- function(df) {
+  print(data.frame(t(as.matrix(c(-100,rep(0,ncol(df)))))))
+  new_row <- data.frame(matrix(c(-100,rep(0,ncol(df)), nrow=1,ncol=ncol(df))))
+  return(new_row)
+  colnames(new_row)<-colnames(df)
+  df <- bind_rows(df, new_row)
+  
+}
+
+test_data<-cycl_data %>% add_zero_row()
+```
+
+
+```{r}
+library(grid)
+library(gridExtra)
+plot_bioanalyzer<-function(sample_data, Wang_1,y_max){
+  
+add_zero_row <- function(df) {
+  new_row <- data.frame(t(as.matrix(c(-10,rep(0,ncol(df))))))
+  colnames(new_row)<-colnames(df)
+  df <- bind_rows(df, new_row)
+  return(df)
+}
+
+sample_data<-sample_data %>% add_zero_row()
+sample_data %>% tail %>% print
+  p1<-ggplot(sample_data, aes(x = Size, y = {{Wang_1}})) +
+  geom_line() +
+  scale_x_continuous(limits=c(-100,1000))+
+    scale_y_continuous(limits = c(0,y_max))+
+  ggtitle("Calibrated Fragment Size Distribution")+
+  theme_bw()+
+  theme(plot.margin=unit(c(2,0,2,2),"lines"),
+        panel.border  = element_blank(),
+        title=element_blank(),
+        text = element_text(size=12)) +
+  labs(x="",y="RFU") +
+  coord_cartesian(xlim=c(-100,1001), expand=FALSE)+
+  geom_area( sample_data %>% filter(Size < 10),mapping=aes(x = Size, y = {{Wang_1}}),fill="red")
+
+p2<-ggplot(sample_data %>% subset(Size>990), aes(x = Size, y = {{Wang_1}})) +
+  geom_line() +
+  scale_x_log10(limits=c(1000,10000),breaks=c(1000,2000,6000))+
+    scale_y_continuous(limits = c(0,y_max)) +
+  ggtitle("Calibrated Fragment Size Distribution") +
+  theme_bw()+
+  theme(plot.margin=unit(c(2,2,2,-0.2), "lines"),
+        title=element_blank(),
+        axis.title.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.text.y=element_blank(),
+        panel.border= element_blank()) +
+  labs(y="", x="") +
+  coord_cartesian(xlim=c(999,20000), expand=FALSE)+
+  geom_area(sample_data %>% filter(Size>5000 & Size <8000),mapping=aes(x = Size, y = {{Wang_1}}),fill="blue")
+
+p<-grid.arrange(arrangeGrob(p1, p2, widths=c(0.6,0.4), ncol=2), ncol=1, heights=c(0.95,0.05),left="RFU")
+return(p)
+}
+```
+
+```{r}
+
+pdf("bioanalyzer.pdf",width = 6, height=4)
+
+plot_bioanalyzer(cycl_data,`0 cycle`,1000)
+plot_bioanalyzer(cycl_data,`5 cycle`,1500)
+plot_bioanalyzer(cycl_data,`10 cycle`,30000)
+plot_bioanalyzer(cycl_data,`15 cycle`,65000)
+
+dev.off()
+
+```
+
+```{r}
+pdf("bioanalyzer.untreated.dashed.pdf",width = 6, height=4)
+plot_bioanalyzer(untreated_data,untreated,2000)
+plot_bioanalyzer(depleted_data,Ph0,2000)
+dev.off()
+
+```
+

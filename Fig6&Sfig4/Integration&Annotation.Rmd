@@ -1,0 +1,258 @@
+---
+title: "Integration_by_DASH"
+output: html_document
+date: "2022-11-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load library
+```{r message=F}
+library(Seurat)
+library(tidyverse)
+library(purrr)
+library(harmony)
+library(patchwork)
+```
+
+Create list-column to store datasets 
+```{r }
+getwd()
+Refract_df<-tribble(~"Rep",~"Depth",~"DASH",~"PATH",
+                 "1","100M","untreated","~/DASH_rep/Analysis/CellRanger_output/rep1_100M/outs/raw_feature_bc_matrix",
+                 "2","100M","untreated","~/DASH_rep/Analysis/CellRanger_output/rep2_100M/outs/raw_feature_bc_matrix",
+                 "3","100M","untreated","~/DASH_rep/Analysis/CellRanger_output/rep3_100M/outs/raw_feature_bc_matrix",
+                 "1","100M","DASH","~/DASH_rep/Analysis/CellRanger_output/rep1_dash_100M/outs/raw_feature_bc_matrix",
+                 "2","100M","DASH","~/DASH_rep/Analysis/CellRanger_output/rep2_dash_100M/outs/raw_feature_bc_matrix",
+                 "3","100M","DASH","~/DASH_rep/Analysis/CellRanger_output/rep3_dash_100M/outs/raw_feature_bc_matrix"
+                 )
+
+
+Refract_df<-Refract_df %>% mutate(Seurat.mat=map(PATH,Read10X))
+```
+
+Create Seurat obj with matrix and named by conditions
+```{r }
+CreateSeuratObject_bySample<-function(count,project_name){
+  return(CreateSeuratObject(counts = count, project = project_name,min.features = 200))
+}
+
+Refract_df<-Refract_df %>%
+  mutate(Name=paste0(Rep,"_",DASH,"_",Depth)) %>% 
+  mutate(Seurat.obj=map2(Seurat.mat,Name,~CreateSeuratObject_bySample(count =.x,project_name = .y)))
+```
+
+Calculate the percentage of 16S
+```{r}
+generate_metadata<-function(Seurat.obj){
+Seurat.obj@meta.data <- Seurat.obj@meta.data %>% mutate(Cell_ID=rownames(Seurat.obj@meta.data)) %>% separate(orig.ident,into=c("rep","DASH","Depth"),sep="_",remove = F) 
+
+Seurat.obj$count.16S<-FetchData(object = Seurat.obj, vars = c("16S-rRNA")) %>% setNames("count.16S")
+
+return(Seurat.obj)
+}
+
+Refract_df$Seurat.obj<-Refract_df$Seurat.obj %>% map(generate_metadata)
+
+Refract_df$Seurat.obj[[1]]@meta.data
+```
+
+Remove 16S counts
+```{r}
+remove_16S<-function(Seurat.obj){
+ 
+  counts <- GetAssayData(Seurat.obj, assay = "RNA")
+  counts <- counts[-(which(rownames(counts) %in% c("16S-rRNA"))),]
+  Seurat.obj.new <- subset(Seurat.obj, features = rownames(counts))
+  Seurat.obj.new@meta.data<-Seurat.obj@meta.data
+  
+return(Seurat.obj.new)
+
+}
+
+Refract_df$Seurat.obj<-Refract_df$Seurat.obj %>% map(remove_16S)
+
+```
+
+Consider the cells existing in both untreated and DASH
+```{r}
+common_Cell_ID <- readRDS("~/DASH_rep/Analysis/Venn_common_cell_ID/common_Cell_ID.rds")
+
+filter_Cell<-function(Seurat.obj,common_Cell_ID){
+  metadata<-Seurat.obj@meta.data
+  metadata<-metadata %>% mutate(Cell=ifelse(Cell_ID %in% common_Cell_ID,"Cell","Non-cell"))
+  Seurat.obj@meta.data<- metadata
+  Seurat.obj<- subset(Seurat.obj,subset=Cell=="Cell")
+  return(Seurat.obj)
+}
+
+for(i in c(1,2,3)){
+Refract_df$Seurat.obj[[i]]<-filter_Cell(Refract_df$Seurat.obj[[i]],common_Cell_ID[[i]])
+Refract_df$Seurat.obj[[i+3]]<-filter_Cell(Refract_df$Seurat.obj[[i+3]],common_Cell_ID[[i]])
+
+}
+```
+
+```{r}
+Refract_df$Seurat.obj<-map(Refract_df$Seurat.obj,~NormalizeData(.) %>% subset(subset=SMESG000036375.1>2.5))
+write.csv(map_dfc(Refract_df$Seurat.obj,~.@meta.data %>%  nrow()), "Number_of_Cells_harmony.csv")
+```
+
+```{r}
+untreated_merged<-merge(Refract_df$Seurat.obj[[1]],y=c(Refract_df$Seurat.obj[[2]],Refract_df$Seurat.obj[[3]]),add.cell.ids=c("rep_1","rep_2","rep_3"))
+
+DASH_merged<-merge(Refract_df$Seurat.obj[[4]],y=c(Refract_df$Seurat.obj[[5]],Refract_df$Seurat.obj[[6]]),add.cell.ids=c("rep_1","rep_2","rep_3"))
+```
+
+```{r}
+clustering<-function(harmony_merged){
+harmony_merged <- harmony_merged %>% FindNeighbors(reduction = "harmony", dims = 1:20) %>% FindClusters(resolution=0.5)}
+
+
+harmony_pipe<-function(harmony_merged){
+harmony_merged <- NormalizeData(harmony_merged) %>% FindVariableFeatures() %>% ScaleData() %>% RunPCA()
+harmony_merged <- RunHarmony(harmony_merged, "orig.ident")
+harmony_merged <- RunUMAP(harmony_merged, reduction = "harmony", dims = 1:50) 
+harmony_merged <- clustering(harmony_merged)
+return(harmony_merged)
+}
+```
+
+```{r }
+obj.list<-list(DASH_merged,untreated_merged) 
+names(obj.list)<-c("DASH","untreated")
+
+obj.list<- obj.list%>% map(.,~harmony_pipe(.x))
+
+```
+
+```{r}
+mito_count<-function(Seurat){
+mito_genes<-c("cox1","nd6","nd5","cox3","ATP6","nd1","cox2","nd3","nd2","cytb","nd4l","nd4")
+mito_counts<- FetchData(object = Seurat, vars = mito_genes) %>% rowSums()
+Seurat$mito.counts<-mito_counts
+return(Seurat)
+}
+```
+
+```{r}
+obj.list<-obj.list %>% map(.,~mito_count(.x))
+```
+
+
+```{r}
+#obj.list %>% map(.,~DimPlot(.x,label=T)+theme(aspect.ratio = 1))
+obj.list %>% map2(.,names(.),~DimPlot(.x,label=T)+theme(aspect.ratio = 1)+ggtitle(.y))
+
+obj.list %>% map2(.,names(.),~FeaturePlot(.x,feature="SMESG000049722.1",label=T)+theme(aspect.ratio = 1)+ggtitle(.y))#CTSL2
+
+obj.list %>% map2(.,names(.),~FeaturePlot(.x,feature="SMESG000065670.1",label=T)+theme(aspect.ratio = 1)+ggtitle(.y))#FoxA
+
+obj.list %>% map2(.,names(.),~FeaturePlot(.x,feature="SMESG000016051.1",label=T)+theme(aspect.ratio = 1)+ggtitle(.y))#ovo
+
+obj.list %>% map2(.,names(.),~FeaturePlot(.x,feature="SMESG000018169.1",label=T)+theme(aspect.ratio = 1)+ggtitle(.y))#nanos
+
+obj.list %>% map2(.,names(.),~FeaturePlot(.x,feature="mito.counts",label=T)+theme(aspect.ratio = 1)+ggtitle(.y))
+
+obj.list %>% map2(.,names(.),~FeaturePlot(.x,feature="count.16S",label=T)+theme(aspect.ratio = 1)+ggtitle(.y))
+```
+
+```{r}
+markers<-read_csv("Nb.marker.SMESG.csv",col_names = T)
+```
+
+```{r}
+map(obj.list,~DotPlot(.,features=markers$SMESG)+scale_x_discrete(labels=markers$Gene)+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)))
+```
+
+```{r}
+obj.list[[1]]<-RenameIdents(obj.list[[1]],"0"="C1", "1"="C2", "2"="C3", "3"="C4", "4"="C5", "5"="C6", "6"="C7", "7"="C8", "8"="C9", "9"="C10", "10"="C11", "11"="C12", "12"="C13", "13"="C14", "14"="C15", "15"="C16", "16"="C17")
+obj.list[[1]]$Annotation<-Idents(obj.list[[1]])
+
+obj.list[[2]]<-RenameIdents(obj.list[[2]],"0"="C1", "1"="C3", "2"="C2", "3"="C4", "4"="C5", "5"="C6", "6"="C7", "7"="C8", "8"="C9", "9"="C13", "10"="C10", "11"="C11", "12"="C12", "13"="C14", "14"="C16", "15"="C17")
+obj.list[[2]]$Annotation<-Idents(obj.list[[2]])
+
+```
+
+```{r}
+map(obj.list,~DimPlot(.,label=T)+scale_x_discrete(labels=markers$Gene)+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)))
+
+map(obj.list,~DotPlot(.,features=markers$SMESG)+scale_x_discrete(labels=markers$Gene)+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)))
+
+```
+```{r}
+C15_Cells<-CellsByIdentities(obj.list[[1]],idents="C15") %>% unlist()
+
+
+obj.list[[2]]$C15<-
+ifelse(colnames(obj.list[[2]])%in%C15_Cells,"C15","others")
+obj.list[[1]]$C15<-
+ifelse(colnames(obj.list[[1]])%in%C15_Cells,"C15","others")
+```
+
+
+```{r}
+obj.list[[2]]%>% DimPlot(group.by = "C15",cols = c("C15"="red","others"="grey"))+theme(aspect.ratio = 1)
+```
+
+
+```{r}
+saveRDS(obj.list,"obj.list.rds")
+```
+
+```{r}
+source("~/Rfunction/scTheme.R")
+# fonts, sizes, etc.
+small.font = 6*2
+big.font = 6*2
+line.width = 0.5*2
+pt.size=0.01*2
+pt.stroke=0.3*2
+label.size=2*2
+
+scTheme <- scThemes(
+  small.font = small.font,
+  big.font = big.font,
+  line.width = line.width,
+  pt.size=pt.size,
+  pt.stroke=pt.stroke,
+  label.size=label.size,
+  aspect.ratio = 1
+)
+
+```
+
+
+```{r}
+levels(obj.list[[2]])  <-obj.list[[1]] %>% levels
+```
+
+
+
+```{r}
+pdf("Clustering_041323.pdf", height = 4, width = 4,compress = F)
+obj.list %>% map2(.,names(.),~DimPlot(.x,label=T)+theme(aspect.ratio = 1)+scTheme$umap+ggtitle(.y))
+obj.list[[2]]%>% DimPlot(group.by = "C15",cols = c("C15"="red","others"="grey"))+theme(aspect.ratio = 1)+scTheme$umap
+obj.list[[1]]%>% DimPlot(group.by = "C15",cols = c("C15"="red","others"="grey"))+theme(aspect.ratio = 1)+scTheme$umap
+dev.off()
+
+
+pdf("DotPlot_042523.pdf", height = 5, width = 5)
+extrafont::loadfonts()
+map(obj.list,~DotPlot(.,features=markers$SMESG)+
+      NoLegend()+
+      coord_flip()+
+      scale_x_discrete(labels=markers$Gene)+
+      theme(aspect.ratio = 1,axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,family="Arial"),axis.text.y=element_text(family="Arial", face = "italic"))+
+      scale_radius(limits=c(20,100))) 
+map(obj.list,~DotPlot(.,features=markers$SMESG)+
+      coord_flip()+
+      scale_x_discrete(labels=markers$Gene)+
+      theme(aspect.ratio = 1,axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,family="Arial"),axis.text.y=element_text(family="Arial", face = "italic"))+
+      scale_radius(limits=c(20,100))) 
+dev.off()
+
+```
+

@@ -1,0 +1,179 @@
+---
+title: "QC.Rmd"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+source("scTheme.R")
+# fonts, sizes, etc.
+small.font = 6*2
+big.font = 6*2
+line.width = 0.5*2
+pt.size=0.01*2
+pt.stroke=0.3*2
+label.size=2*2
+
+scTheme <- scThemes(
+  small.font = small.font,
+  big.font = big.font,
+  line.width = line.width,
+  pt.size=pt.size,
+  pt.stroke=pt.stroke,
+  label.size=label.size
+)
+
+
+```
+
+```{r}
+library(tidyverse)
+library(vroom)
+```
+
+```{r}
+
+files <- dir("./tsv",full.names = T)
+
+combine_QC<-vroom(files)
+```
+
+```{r }
+mckolors <- read.csv("McKolor_v1.csv") %>%
+  as.list() %>%
+  lapply(
+    FUN=function(X) X[X!=""]
+  )
+```
+
+```{r}
+limit.dataset=c("Fincher.1","Fincher.2","Fincher.3","Fincher.4","Fincher.5" ,
+"Plass"       ,   "SmartSeq2" , "SplitSeq.1", "SplitSeq.2", "SplitSeq.3","ACME" 
+,"Scimone","Zeng")
+
+label.dataset=c("DropSeq.1","DropSeq.2","DropSeq.3","DropSeq.4","DropSeq.5" ,
+"DropSeq.6"       ,   "SmartSeq2" , "SplitSeq.1", "SplitSeq.2", "SplitSeq.3","SplitSeq.ACME" 
+,"10X.1","10X.2")
+label2.dataset=c("DropSeq.1","DropSeq.2","DropSeq.3","DropSeq.4","DropSeq.5" ,
+"DropSeq.6"       ,   "**SmartSeq2" , "SplitSeq.1", "SplitSeq.2", "SplitSeq.3","SplitSeq.ACME" 
+,"10X.1","10X.2")
+```
+
+```{r 16S}
+r16.plot<-ggplot(combine_QC,mapping=aes(x=dataset,y=100*count.16S/nCount_RNA))+
+  geom_jitter(mapping=aes(color=dataset),alpha=0.1)+
+  geom_boxplot(outlier.alpha = 0,color="black")+
+  ylab(label="16S UMIs (%)")+
+scTheme$scatter+ 
+  theme(
+  axis.text.x = element_text(color = "black",angle=45,hjust=1,vjust=1)
+)+
+  scale_color_manual(
+    values=mckolors$polychrome
+  )+
+  scale_x_discrete(limits=limit.dataset,labels=label.dataset)+ guides(labels=label.dataset,colour = guide_legend(override.aes = list(alpha = 1)))
+
+  #ggsave(plot = p,
+   # filename="boxplot2.pdf",
+   # device="pdf",width=5,height=5,units = "in",useDingbats = F
+ # )
+```
+
+```{r Gene per cell}
+Feature.plot<-ggplot(combine_QC,mapping=aes(x=dataset,y=nFeature_RNA))+
+  geom_jitter(mapping=aes(color=dataset),alpha=0.1)+
+  geom_boxplot(outlier.alpha = 0,color="black")+
+  ylab(label="Genes per cell")+
+  scTheme$scatter+ 
+  theme(
+  axis.text.x = element_text(color = "black",angle=45,hjust=1,vjust=1)
+)+
+  scale_color_manual(
+    values=mckolors$polychrome
+  )+
+  scale_x_discrete(limits=limit.dataset,labels=label.dataset)+ guides(labels=label.dataset,colour = guide_legend(override.aes = list(alpha = 1)))
+
+
+```
+
+```{r 12S}
+r12.plot<-ggplot(combine_QC,mapping=aes(x=dataset,y=100*count.12S/nCount_RNA))+
+  geom_jitter(mapping=aes(color=dataset),alpha=0.1)+
+  geom_boxplot(outlier.alpha = 0,color="black")+
+  ylab(label="12S UMIs (%)")+
+scTheme$scatter+ 
+  theme(
+  axis.text.x = element_text(color = "black",angle=45,hjust=1,vjust=1)
+)+
+  scale_color_manual(
+    values=mckolors$polychrome
+  )+
+  scale_x_discrete(limits=limit.dataset,labels=label.dataset)+ guides(labels=label.dataset,colour = guide_legend(override.aes = list(alpha = 1)))
+
+```
+
+```{r mito}
+mito.plot<-ggplot(combine_QC,mapping=aes(x=dataset,y=100*mito_counts/nCount_RNA))+
+  geom_jitter(mapping=aes(color=dataset),alpha=0.1)+
+  geom_boxplot(outlier.alpha = 0,color="black")+
+  ylab(label="Mitochondria protein (%)")+
+scTheme$scatter+ 
+  theme(
+  axis.text.x = element_text(color = "black",angle=45,hjust=1,vjust=1)
+)+
+  scale_color_manual(
+    values=mckolors$polychrome
+  )+
+  scale_x_discrete(limits=limit.dataset,labels=label.dataset)+ guides(labels=label.dataset,colour = guide_legend(override.aes = list(alpha = 1)))
+
+```
+
+```{r UMI}
+UMI.plot<-ggplot(combine_QC,mapping=aes(x=dataset,y=log10(nCount_RNA)))+
+  geom_jitter(mapping=aes(color=dataset),alpha=0.1)+
+  geom_boxplot(outlier.alpha = 0,color="black")+
+  ylab(label=bquote(bold(log[10]~"UMI per cell")))+
+scTheme$scatter+ 
+  theme(
+  axis.text.x = element_text(color = "black",angle=45,hjust=1,vjust=1)
+)+
+  scale_color_manual(
+    values=mckolors$polychrome
+  )+
+  scale_x_discrete(limits=limit.dataset,labels=label2.dataset)+ guides(labels=label.dataset,colour = guide_legend())
+
+```
+
+```{r}
+library(patchwork)
+combine.plot<-wrap_plots(list(r16.plot,r12.plot,Feature.plot,UMI.plot,guide_area())%>%
+  wrap_plots(
+    guides="collect",
+    ncol=2
+  )&guides(colour = guide_legend(nrow = 4, byrow = T,override.aes = list(alpha = 1)))&theme(legend.text = element_text(size=8),legend.position="none",text = element_text(family = "Arial"), axis.text.x=element_text(family = "Arial",face="bold") )&xlab(label=NULL))+ plot_annotation(tag_levels = 'A')&theme(plot.tag = element_text(face = 'bold', size=14))
+  
+ # ,heights = unit(c(5,5),c("in","")),widths=unit(c(5,5),c("in","in")))
+#extrafont::font_import()
+extrafont::loadfonts()
+
+ggsave(combine.plot,file="Figure.1.pdf",device="pdf",width=10,height=10,units = "in",dpi = 300)
+
+ggsave(combine.plot,file="Figure.1.png",device="png",width=8.5,height=10,units = "in")
+
+```
+
+```{r}
+QC_summary<-combine_QC %>% group_by(dataset) %>% 
+  summarise(
+    nFeature_mid=median(nFeature_RNA),
+    nCount_mid=median(nCount_RNA),
+    pct.16S=paste0(round(median(100*count.16S/nCount_RNA),2),"%"),
+    pct.12S=paste0(round(median(100*count.12S/nCount_RNA),2),"%"),
+    pct.mito=paste0(round(median(100*mito_counts/nCount_RNA),2),"%"),
+            )
+
+write_tsv(QC_summary,"QC_summary.tsv",col_names = T)
+```

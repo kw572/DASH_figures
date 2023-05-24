@@ -1,0 +1,141 @@
+---
+title: "box.plot.rmd"
+output: html_document
+date: "2022-10-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load library, message=F}
+library(patchwork)
+library(tidyverse)
+library(patchwork)
+```
+
+```{r load data}
+rarefraction <- readRDS("rarefraction.rds")
+```
+
+```{r}
+source("~/Rfunction/scTheme.R")
+# fonts, sizes, etc.
+small.font = 6*2
+big.font = 6*2
+line.width = 0.5*2
+pt.size=0.01*2
+pt.stroke=0.3*2
+label.size=2*2
+
+scTheme <- scThemes(
+  small.font = small.font,
+  big.font = big.font,
+  line.width = line.width,
+  pt.size=pt.size,
+  pt.stroke=pt.stroke,
+  label.size=label.size
+)
+
+mckolors <- read.csv("~/Rfunction/McKolor_v1.csv") %>%
+  as.list() %>%
+  lapply(
+    FUN=function(X) X[X!=""]
+  )
+```
+
+```{r plots}
+Title<-list("10M","50M","100M","150M","200M")
+Depth<-as.list(unique(rarefraction$Depth))
+
+boxplots<-function(data,.x,.y){
+  data%>% filter(Depth==.x) %>% group_by(DASH) %>% 
+  ggplot(mapping=aes(x=orig.ident,y=pct.16S*100, fill=DASH))+geom_boxplot()+
+  scTheme$scatter+scale_x_discrete(labels=rep(c("rep1","rep2","rep3"),2))+
+  xlab(label=NULL)+ylab(label="16S rRNA (%)")+ggtitle(label=paste0(.y," reads"))+theme(plot.title = element_text(size=14))+
+  theme(aspect.ratio = 1)
+  
+}
+```
+
+```{r}
+plots<-map2(Depth,Title,~boxplots(rarefraction,.x,.y))
+finalplot<-plots[[1]]+plots[[2]]+plots[[3]]+plots[[4]]+plots[[5]]+guide_area()+plot_layout(guides = "collect")+plot_annotation(tag_levels = 'A')
+
+ggsave("boxplot.rep.pdf",width = 10,height = 10)
+print(finalplot)
+dev.off()
+```
+
+```{r}
+boxplots_100M<-function(data,col,range){
+  
+  col2=enquo(col)
+  data$DASH<-factor(data$DASH,levels=c("untreated","DASH"))
+  data%>% filter(Depth==100000000) %>% group_by(DASH) %>% 
+  ggplot(mapping=aes(x=rep,y=(!!col2), fill=DASH))+
+    geom_boxplot()+
+    scTheme$scatter+scale_x_discrete(labels=rep(c("rep1","rep2","rep3"),2))+
+    scale_fill_manual(values=c(scales::hue_pal()(2)[2],scales::hue_pal()(2)[1]))+
+    xlab(label=NULL)+
+    scale_y_continuous(limits = c(0,range))+
+    ggtitle(label=("100M reads"))+
+    theme(plot.title = element_text(size=14))+
+    theme(aspect.ratio = 1)
+  
+}
+```
+
+```{r}
+rarefraction<-rarefraction %>% mutate(mRNA=nCount_RNA-count.16S) 
+```
+
+
+```{r}
+boxplot.16S<-boxplots_100M(rarefraction,pct.16S*100,100)+ylab(label="16S UMI (%)")
+boxplot.count<-boxplots_100M(rarefraction,mRNA,20000)+ylab(label="non-16S UMI per cell")
+boxplot.gene<-boxplots_100M(rarefraction,nFeature_RNA,4000)+ylab(label="Genes per cell")
+finalplot<-list("16S"=boxplot.16S,"mRNA"=boxplot.count,"Gene"=boxplot.gene)
+```
+
+
+```{r}
+saveRDS(finalplot,"boxplot.rds")
+```
+
+```{r}
+
+plot_FC<-function(rarefraction,col){
+  col2<-enquo(col)
+  df <-rarefraction %>% filter(Depth==1e+8) %>% 
+  mutate(mRNA=nCount_RNA-count.16S) %>% 
+  select(rep,Cell_ID,!!col2,DASH) %>% 
+  pivot_wider(names_from = DASH, values_from = !!col2) %>% 
+  mutate(FC=DASH/untreated) 
+  
+  print(df%>% 
+    group_by(rep) %>% 
+    summarise(Median=median(FC)))
+  
+  return(ggplot(df,mapping = aes(x=rep,y=FC,fill=rep))+geom_boxplot()+
+    scTheme$scatter+
+    xlab(label=NULL)+
+    ylab(label=paste0("FC of ",deparse(substitute(col))))+
+    scale_y_continuous(limits = c(0,2))+
+    geom_text(data = df%>% 
+    group_by(rep) %>% 
+    summarise(Median=median(FC)),mapping=aes(x=rep,y=Median+0.05,label=round(Median,2)))+
+    theme(aspect.ratio = 1)+
+    scale_color_manual(values=mckolors$polychrome))
+
+   
+  }
+
+
+p1<-plot_FC(rarefraction ,mRNA)
+p1
+p2<-plot_FC(rarefraction ,nFeature_RNA)
+
+saveRDS(list(p1,p2),"FC.boxplot.rds")
+```
+

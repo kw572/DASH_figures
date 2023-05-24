@@ -1,0 +1,84 @@
+---
+title: "pct16.untreated.rmd"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(patchwork)
+library(tidyverse)
+```
+
+```{r}
+metadata<-readRDS("metadata.all.rep.rds")
+```
+
+```{r}
+source("~/Rfunction/scTheme.R")
+# fonts, sizes, etc.
+small.font = 6*2
+big.font = 6*2
+line.width = 0.5*2
+pt.size=0.01*2
+pt.stroke=0.3*2
+label.size=2*2
+
+scTheme <- scThemes(
+  small.font = small.font,
+  big.font = big.font,
+  line.width = line.width,
+  pt.size=pt.size,
+  pt.stroke=pt.stroke,
+  label.size=label.size
+)
+
+```
+
+```{r }
+mckolors <- read.csv("~/Rfunction/McKolor_v1.csv") %>%
+  as.list() %>%
+  lapply(
+    FUN=function(X) X[X!=""]
+  )
+```
+
+```{r}
+# Define the order of the labels on the x-axis
+label.dataset <- c("untreated-specific", "untreated-shared", "DASH-shared", "DASH-specific")
+order <- c("untreated-specific", "untreated-shared", "DASH-shared", "DASH-specific")
+
+# Create a boxplot for the untreated and DASH conditions
+p1 <- ggplot(metadata, mapping = aes(x = specific, y = pct.16S * 100, fill = orig.ident)) +
+  geom_boxplot(outlier.alpha = 0, color = "black") +
+  ylab(label = "16S rRNA (%)") +
+  xlab(label = NULL) +
+  scTheme$scatter +
+  theme(
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, vjust = 1)
+  ) +
+  scale_color_manual(values = mckolors$polychrome) +
+  scale_x_discrete(limits = order)
+
+# Create a boxplot for the DASH condition only, with a y-axis limit of 0 to 0.2
+p2 <- ggplot(metadata %>% filter(condition == "dash"), mapping = aes(x = specific, y = pct.16S * 100, fill = orig.ident)) +
+  geom_boxplot(outlier.alpha = 0, color = "black") +
+  ylab(label = "16S rRNA (%)") +
+  xlab(label = NULL) +
+  scTheme$scatter +
+  theme(
+    axis.text.x = element_text(color = "black", angle = 45, hjust = 1, vjust = 1)
+  ) +
+  scale_color_manual(values = mckolors$polychrome) +
+  scale_y_continuous(limits = c(0, 0.2)) +
+  NoLegend()
+
+# Combine the two plots into a single PDF
+pdf("pct.16S.untreated.boxplot.pdf",compress = F)
+p1 + p2 & theme(aspect.ratio = 1)
+dev.off()
+
+```
+

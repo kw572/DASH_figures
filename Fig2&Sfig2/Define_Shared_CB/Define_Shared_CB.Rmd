@@ -1,0 +1,163 @@
+---
+title: "DASH_rep"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Set up chunk options
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Load library, message=FALSE}
+# Load required libraries
+library(tidyverse)
+library(Seurat)
+library(purrr)
+
+```
+
+```{r Creat list-column to store datasets }
+# Create a tibble with file paths for raw feature-barcode matrices, one for each sample.
+# For each sample, we have an untreated and a DASH-treated dataset.
+full_df <- tribble(~"Rep", ~"DASH", ~"PATH",
+                   "1", "untreated", "../CellRanger_output/rep1/outs/filtered_feature_bc_matrix",
+                   "1", "DASH", "../CellRanger_output/rep1_dash/outs/filtered_feature_bc_matrix",
+                   "2", "untreated", "../CellRanger_output/rep2/outs/filtered_feature_bc_matrix",
+                   "2", "DASH", "../CellRanger_output/rep2_dash/outs/filtered_feature_bc_matrix",
+                   "3", "untreated", "../CellRanger_output/rep3/outs/filtered_feature_bc_matrix",
+                   "3", "DASH", "../CellRanger_output/rep3_dash/outs/filtered_feature_bc_matrix"
+                  )
+
+# Read in the feature-barcode matrices and store them as a list-column in full_df.
+full_df <- full_df %>% mutate(Seurat.mat = map(PATH, Read10X))
+
+```
+
+```{r Creat Seurat obj with matrix and name by conditions}
+# Define a function to create a Seurat object given a feature-barcode matrix and project name.
+CreateSeuratObject_bySample <- function(count, project_name) {
+  return(CreateSeuratObject(counts = count, project = project_name, min.features = 0))
+}
+
+# Create Seurat objects for each sample using the feature-barcode matrices stored in full_df.
+full_df <- full_df %>% mutate(Seurat.obj = map2(Seurat.mat, Rep, ~CreateSeuratObject_bySample(count = .x, project_name = .y)))
+
+```
+
+```{r Identify shared Cell barcodes and make venn plot}
+# Extract cell barcodes for each Seurat object in full_df.
+CellID <- map(full_df$Seurat.obj, colnames)
+
+# Load ggvenn and patchwork libraries.
+library(ggvenn)
+library(patchwork)
+
+# Create a list of Venn diagrams, one for each replicate.
+rep <- list()
+for(i in c(1, 2, 3)) {
+  # Determine the indices of the untreated and DASH Seurat objects for each replicate.
+  a <- 2 * i - 1
+  b <- 2 * i
+  
+  # Generate a Venn diagram for the untreated and DASH samples.
+  rep[[i]] <- ggvenn(data = list("Untreated" = CellID[[a]], "DASH" = CellID[[b]]), 
+                     fill_color = c("green", "blue"), columns = c("Untreated", "DASH")) +
+              ggtitle(label = paste0("Venn diagram of cell barcodes: rep ", i))
+}
+
+```
+
+```{r generate venn plot}
+# Save the Venn diagrams as a multi-page PDF file.
+pdf("Venn.pdf", height = 5, width = 5,compress = F)
+rep
+dev.off()
+```
+
+Create Venn Diagrams for Cell IDs
+```{r}
+library(BioVenn)
+
+# Create a list to store the Venn diagrams for each replicate
+rep.venn <- list()
+
+# Create a pdf file to save the Venn diagrams
+pdf("cell_ID.venn.pdf", height = 3, width = 3)
+
+# Loop through the replicates and create Venn diagrams for each pair
+for(i in c(1, 2, 3)) {
+  a <- 2*i - 1
+  b <- 2*i
+  
+  # Store the Venn diagram in the list
+  rep.venn[[i]] <- draw.venn(NULL, CellID[[a]], CellID[[b]], title = paste0("Replicate ", i), subtitle = "common barcodes", ytitle = "Untreated", ztitle = "DASH")
+}
+
+# Save and close the pdf file
+dev.off()
+
+```
+
+
+Identify Dataset-Specific and Common Cell IDs
+```{r Identify dataset specific/common Cell IDs}
+# Create empty lists to store the dataset-specific and common Cell IDs for each replicate
+rep_untreated_specific <- list()
+rep_DASH_specific <- list()
+rep_common <- list()
+
+# Loop through the replicates and extract the specific and common Cell IDs
+for(i in c(1, 2, 3)) {
+  rep_untreated_specific[[i]] <- rep.venn[[i]]$y_only
+  rep_DASH_specific[[i]] <- rep.venn[[i]]$z_only
+  rep_common[[i]] <- rep.venn[[i]]$yz_only
+}
+```
+
+Count the Number of 16S-rRNA Molecules
+```{r}
+# Define a function to count the number of 16S-rRNA molecules in each cell
+count.16S <- function(Seurat) {
+  Seurat$count.16S <- FetchData(object = Seurat, vars = c("16S-rRNA")) %>% as.vector()
+  Seurat$pct.16S <- Seurat$count.16S / Seurat$nCount_RNA
+  return(Seurat)
+}
+```
+
+Count the Number of 16S-rRNA Molecules in Each Cell and Seurat Object
+```{r}
+full_df$Seurat.obj<-map(full_df$Seurat.obj,~count.16S(.x))
+```
+
+Create Metadata for the Percentage of 16S-rRNA Molecules
+```{r}
+pct.16S.untreated<-list()
+pct.16S.dash<-list()
+
+
+for(i in c(1,2,3)){
+    
+  a<-2*i-1
+    
+pct.16S.untreated[[i]]<-full_df$Seurat.obj[[a]]@meta.data %>%
+  rownames_to_column(var="Cell_ID") %>% mutate(specific=ifelse(Cell_ID %in%
+                                                    rep_untreated_specific[[i]],"untreated-specific","untreated-shared"),orig.ident=paste0("rep ",orig.ident),condition="untreated") 
+}
+
+for(i in c(1,2,3)){
+    
+  a<-2*i
+    
+pct.16S.dash[[i]]<-full_df$Seurat.obj[[a]]@meta.data %>%
+  rownames_to_column(var="Cell_ID") %>% mutate(specific=ifelse(Cell_ID %in%
+                                                    rep_DASH_specific[[i]],"DASH-specific","DASH-shared"),orig.ident=paste0("rep ",orig.ident),condition="dash") 
+}
+
+pct.16S.mean<-rbind(bind_rows(pct.16S.untreated),bind_rows(pct.16S.dash)) 
+```
+
+```{r}
+saveRDS(pct.16S.mean,"metadata.all.rep.rds")
+saveRDS(rep_common,"common_Cell_ID.rds")
+```
+

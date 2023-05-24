@@ -1,0 +1,194 @@
+---
+title: "Rarefraction.rep.plot.rmd"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(patchwork)
+library(tidyverse)
+```
+
+```{r}
+rarefraction <- readRDS("~/DASH_rep/Analysis/Rarefraction/rarefraction.rds")
+```
+
+```{r}
+source("~/Rfunction/scTheme.R")
+# fonts, sizes, etc.
+small.font = 8
+big.font = 10
+line.width = 0.5*2
+pt.size=0.01*2
+pt.stroke=0.3*2
+label.size=2*2
+
+scTheme <- scThemes(
+  small.font = small.font,
+  big.font = big.font,
+  line.width = line.width,
+  pt.size=pt.size,
+  pt.stroke=pt.stroke,
+  label.size=label.size
+)
+
+```
+
+```{r }
+mckolors <- read.csv("~/Rfunction/McKolor_v1.csv") %>%
+  as.list() %>%
+  lapply(
+    FUN=function(X) X[X!=""]
+  )
+```
+
+```{r}
+Summarized_table<-rarefraction %>% 
+  mutate(mRNA=nCount_RNA-count.16S) %>% 
+  group_by(orig.ident) %>% 
+  summarise(Median_Count=median(nCount_RNA),Median_Feature=median(nFeature_RNA),Median_16S=median(count.16S),Median_mRNA=median(mRNA)) %>% 
+separate(orig.ident,into=c("rep","DASH","Depth"),sep="_") %>% 
+  mutate(rep=paste0("rep ",rep))
+
+add_zero<-tribble(~"rep",~"DASH",~"Depth",~"Median_Count",~"Median_Feature",~"Median_16S",~"Median_mRNA",
+                   "rep 1","DASH",0,0,0,0,0,
+                  "rep 2","DASH",0,0,0,0,0,
+                  "rep 3","DASH",0,0,0,0,0,
+                  "rep 1","untreated",0,0,0,0,0,
+                  "rep 2","untreated",0,0,0,0,0,
+                  "rep 3","untreated",0,0,0,0,0) 
+
+Summarized_table<-Summarized_table %>% rbind(add_zero)
+```
+
+
+```{r}
+Summarized_table <-Summarized_table %>% mutate(Depth=as.numeric(ifelse(Depth=="50M",50000000,ifelse(Depth=="100M",100000000,ifelse(Depth=="150M",150000000,ifelse(Depth=="200M",200000000,ifelse(Depth=="10M",10000000,Depth)))))))
+```
+
+```{r}
+rarefraction$DASH<-factor(rarefraction$DASH,levels = c("untreated","DASH"))
+rarefraction$DASH<-factor(rarefraction$DASH,levels = c("untreated","DASH"))
+
+```
+
+```{r}
+rarefraction$mRNA=rarefraction$nCount_RNA-rarefraction$count.16S
+```
+
+```{r}
+p_16S<-ggplot(rarefraction,mapping=aes(x=rep,y=count.16S/nCount_RNA*100,fill=DASH))+geom_boxplot()+scTheme$scatter+scale_fill_manual(values=c(scales::hue_pal()(2)[2],scales::hue_pal()(2)[1]))+theme(aspect.ratio = 1)+ylab("16S UMI(%)")
+```
+
+```{r}
+p_gene<-ggplot(rarefraction,mapping=aes(x=rep,y=nFeature_RNA,fill=DASH))+geom_boxplot()+scTheme$scatter+scale_fill_manual(values=c(scales::hue_pal()(2)[2],scales::hue_pal()(2)[1]))+theme(aspect.ratio = 1)+ylab("Genes per cell")+scale_y_continuous(limits = c(0,4000))
+```
+
+```{r}
+p_mRNA<-ggplot(rarefraction,mapping=aes(x=rep,y=mRNA,fill=DASH))+geom_boxplot()+scTheme$scatter+scale_fill_manual(values=c(scales::hue_pal()(2)[2],scales::hue_pal()(2)[1]))+theme(aspect.ratio = 1)+ylab("non-16S UMI per cell")+scale_y_continuous(limits = c(0,7500))
+```
+
+Make FC plots
+```{r}
+untreated<-rarefraction %>% group_by(rep) %>% pivot_wider(names_from = DASH,values_from = mRNA) %>% mutate(Cell_ID=paste0(rep,"_",Cell_ID)) %>% filter(Depth==1e+8) %>% select(untreated,rep,Cell_ID)  %>% drop_na() %>% ungroup
+
+DASH<-rarefraction %>% group_by(rep) %>% pivot_wider(names_from = DASH, values_from = mRNA)%>% mutate(Cell_ID=paste0(rep,"_",Cell_ID)) %>% filter(Depth==1e+8) %>% select(DASH,rep,Cell_ID) %>% drop_na() %>% ungroup
+
+df_mRNA<-left_join(untreated,DASH,by="Cell_ID")
+
+fc_mRNA<-df_mRNA %>% mutate(fc_mRNA=DASH/untreated)
+
+fc_mRNA %>% group_by(rep.x) %>% summarise(median=median(fc_mRNA))
+
+p_fc_mRNA<-ggplot(fc_mRNA,aes(x=rep.x,y=fc_mRNA,fill=rep.x))+geom_boxplot()+ scale_fill_manual(values = c("#0096FF","#89CFF0","#088F8F"))+scTheme$scatter+scale_y_continuous(limit=c(0,2.5))+theme(aspect.ratio = 1)
+```
+
+```{r}
+untreated<-rarefraction %>% group_by(rep) %>% pivot_wider(names_from = DASH, values_from = nFeature_RNA) %>% mutate(Cell_ID=paste0(rep,"_",Cell_ID)) %>% filter(Depth==1e+8) %>% select(untreated,rep,Cell_ID)  %>% drop_na() %>% ungroup
+
+DASH<-rarefraction %>% group_by(rep) %>% pivot_wider(names_from = DASH, values_from = nFeature_RNA)%>% mutate(Cell_ID=paste0(rep,"_",Cell_ID)) %>% filter(Depth==1e+8) %>% select(DASH,rep,Cell_ID) %>% drop_na() %>% ungroup
+
+df_gene<-left_join(untreated,DASH,by="Cell_ID")
+
+fc_gene<-df_gene %>% mutate(fc_gene=DASH/untreated)
+
+fc_gene %>% group_by(rep.x) %>% summarise(median=median(fc_gene))
+
+p_fc_gene<-ggplot(fc_mRNA,aes(x=rep.x,y=fc_mRNA,fill=rep.x))+geom_boxplot()+ scale_fill_manual(values = c("#0096FF","#89CFF0","#088F8F"))+scTheme$scatter+scale_y_continuous(limit=c(0,2.5))+theme(aspect.ratio = 1)
+```
+
+```{r}
+untreated<-rarefraction %>% group_by(rep) %>% pivot_wider(names_from = DASH, values_from = count.16S) %>% mutate(Cell_ID=paste0(rep,"_",Cell_ID)) %>% filter(Depth==1e+8) %>% select(untreated,rep,Cell_ID)  %>% drop_na() %>% ungroup
+
+DASH<-rarefraction %>% group_by(rep) %>% pivot_wider(names_from = DASH, values_from = count.16S)%>% mutate(Cell_ID=paste0(rep,"_",Cell_ID)) %>% filter(Depth==1e+8) %>% select(DASH,rep,Cell_ID) %>% drop_na() %>% ungroup
+
+df_16S<-left_join(untreated,DASH,by="Cell_ID")
+
+fc_16S<-df_16S %>% mutate(fc_16S=untreated/DASH)
+
+fc_16S %>% group_by(rep.x) %>% summarise(median=median(log10(fc_16S)))
+
+p_fc_16S<-ggplot(fc_16S,aes(x=rep.x,y=fc_16S,fill=rep.x))+geom_boxplot()+ scale_fill_manual(values = c("#0096FF","#89CFF0","#088F8F"))+scTheme$scatter+scale_y_continuous(limit=c(0,2.5))+theme(aspect.ratio = 1)
+```
+
+Make rarefaction plots
+```{r}
+p1<-Summarized_table%>% 
+  ggplot(mapping=aes(x=Depth,y=Median_Count,shape=rep))+
+  scTheme$scatter+
+  scale_y_continuous(limits=c(0,15000))+
+  scale_x_continuous(limits=c(0,250000000),labels = c("0M","50M","100M","150M","200M","250M"))+
+  geom_point(size=4, alpha=0.8)+
+  geom_line(aes(color=DASH))+
+  ylab("Median of UMI per cell")+
+  xlab("Total reads")+
+  theme(aspect.ratio = 1)
+
+
+p2<-Summarized_table%>% 
+  ggplot(mapping=aes(x=Depth,y=Median_Feature,shape=rep))+
+  scTheme$scatter+
+  scale_y_continuous(limits=c(0,3000))+
+  scale_x_continuous(limits=c(0,250000000),labels = c("0M","50M","100M","150M","200M","250M"))+
+  geom_point(size=4, alpha=0.8)+
+  geom_line(aes(color=DASH))+
+  ylab("Median of genes per cell")+
+  xlab("Total reads")+
+  theme(aspect.ratio = 1)
+
+p3<-Summarized_table%>% 
+  ggplot(mapping=aes(x=Depth,y=Median_16S,shape=rep))+
+  scTheme$scatter+
+  scale_y_continuous(limits=c(0,10000))+
+  scale_x_continuous(limits=c(0,250000000),labels = c("0M","50M","100M","150M","200M","250M"))+
+  geom_point(size=4, alpha=0.8)+
+  geom_line(aes(color=DASH))+
+  ylab("Median of 16S UMI per cell")+
+  xlab("Total reads")+
+  theme(aspect.ratio = 1)
+
+p4<-Summarized_table%>% 
+  ggplot(mapping=aes(x=Depth,y=Median_mRNA,shape=rep))+
+  scTheme$scatter+
+  scale_y_continuous(limits=c(0,6500))+
+  scale_x_continuous(limits=c(0,250000000),labels = c("0M","50M","100M","150M","200M","250M"))+
+  geom_point(size=4, alpha=0.8)+
+  geom_line(aes(color=DASH))+
+  ylab("Median of non-16S UMI per cell")+
+  xlab("Total reads")+
+  theme(aspect.ratio = 1)
+```
+
+```{r}
+pdf("rarefraction.rep.pdf",width=8.5,height=6)
+wrap_plots(p_16S,p_mRNA,p_gene,p2,p4,ncol = 3,guides = "collect")+plot_annotation(tag_levels = 'A')
+dev.off()
+```
+
+```{r}
+write_csv(Summarized_table,"Summarized_table.csv",col_names = T)
+```
+

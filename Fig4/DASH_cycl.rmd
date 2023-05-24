@@ -1,0 +1,81 @@
+---
+title: "DASH_cycl.rmd"
+output: html_document
+date: "2022-10-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE}
+library(Seurat)
+library(tidyverse)
+library(purrr)
+library(rlang)
+```
+
+```{r Creat list-column to store datasets }
+getwd()
+
+Refract_df<-tribble(~"Cycl",~"Depth",~"PATH",
+                 "0cycl","121M","../CellRangerOutput/0cycl/outs/raw_feature_bc_matrix",
+                 "0cycl","10M","../CellRangerOutput/0cycl_10M/outs/raw_feature_bc_matrix",
+                 "0cycl","50M","../CellRangerOutput/0cycle_50M/outs/raw_feature_bc_matrix",
+                 "0cycl","100M","../CellRangerOutput/0cycle_100M/outs/raw_feature_bc_matrix",
+                 "5cycl","135M","../CellRangerOutput/5cycl/outs/raw_feature_bc_matrix",
+                 "5cycl","10M","../CellRangerOutput/5cycle_10M/outs/raw_feature_bc_matrix",
+                 "5cycl","50M","../CellRangerOutput/5cycle_50M/outs/raw_feature_bc_matrix",
+                 "5cycl","100M","../CellRangerOutput/5cycle_100M/outs/raw_feature_bc_matrix",
+                 "10cycl","148M","../CellRangerOutput/10cycl/outs/raw_feature_bc_matrix",
+                 "10cycl","10M","../CellRangerOutput/10cycle_10M/outs/raw_feature_bc_matrix",
+                 "10cycl","50M","../CellRangerOutput/10cycle_50M/outs/raw_feature_bc_matrix",
+                 "10cycl","100M","../CellRangerOutput/10cycle_100M/outs/raw_feature_bc_matrix",)
+
+Refract_df<-Refract_df %>% mutate(Seurat.mat=map(PATH,Read10X))
+```
+
+```{r Creat Seurat obj with matrix and name by conditions}
+CreateSeuratObject_bySample<-function(count,project_name){
+  return(CreateSeuratObject(counts = count, project = project_name,min.features = 1))
+}
+
+Refract_df<-Refract_df %>%
+  mutate(Name=paste0(Cycl,"_",Depth)) %>% 
+  mutate(Seurat.obj=map2(Seurat.mat,Name,~CreateSeuratObject_bySample(count =.x,project_name = .y)))
+```
+
+```{r}
+merge_refact<-merge(Refract_df$Seurat.obj[[1]],y=Refract_df$Seurat.obj[2:12],add.cell.ids =Refract_df$Name,project="refreaction")
+```
+
+```{r}
+merge_refact@meta.data <- merge_refact@meta.data %>% rownames_to_column(var="ID") %>% separate(ID,into=c("rep","Depth","Cell_ID"),sep="_") 
+```
+
+```{r}
+common_Cell_ID <- read_tsv("../CellRangerOutput/10cycl/outs/filtered_feature_bc_matrix/barcodes.cell.tsv")
+
+merge_refact$Cell <-ifelse(merge_refact$Cell_ID%in%common_Cell_ID[[1]],"Cell","Non-cell")
+
+```
+
+```{r}
+merge_refact$count.16S<-merge_refact@assays$RNA@counts[which(rownames(merge_refact@assays$RNA@counts)=="16S-rRNA"),]
+metadata<-merge_refact@meta.data %>% filter(Cell=="Cell")
+```
+
+```{r}
+x<-data.frame(Depth=c("10M","50M","100M","121M","135M","148M"),Depth.val=c(10000000,50000000,100000000,121742680,135608431,148353961))
+
+metadata <-metadata %>% left_join(x)
+```
+
+```{r}
+metadata <-metadata %>% mutate(pct.16S=count.16S/nCount_RNA) %>% mutate(mRNA=nCount_RNA-count.16S)
+```
+
+
+```{r}
+saveRDS(metadata,"rarefraction_cycl.rds")
+```
